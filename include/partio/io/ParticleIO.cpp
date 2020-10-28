@@ -168,7 +168,7 @@ write(const char* c_filename,const ParticlesData& particles,const bool forceComp
     string filename(c_filename);
     string extension;
     bool endsWithGz;
-    if(!extensionIgnoringGz(filename,extension,endsWithGz,errorStream))}return;
+    if(!extensionIgnoringGz(filename,extension,endsWithGz,errorStream)) return;
     map<string,WRITER_FUNCTION>::iterator i=writers().find(extension);
     if(i==writers().end()){
         errorStream<<"Partio: No writer defined for extension "<<extension<<endl;
