@@ -13,13 +13,13 @@ template <typename T>
 void remove_at(std::vector<T> &vector, const std::vector<int> &to_remove)
 {
     auto vector_base = vector.begin();
-    std::vector<T>::size_type down_by = 0;
+    typename std::vector<T>::size_type down_by = 0;
 
     for (auto iter = to_remove.cbegin();
          iter < to_remove.cend();
          iter++, down_by++)
     {
-        std::vector<T>::size_type next = (iter + 1 == to_remove.cend()
+        typename std::vector<T>::size_type next = (iter + 1 == to_remove.cend()
                                               ? vector.size()
                                               : *(iter + 1));
 
