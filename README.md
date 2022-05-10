@@ -1,6 +1,6 @@
 # KiriExtlib
 
-KiriExtlib is a repository for storing third-party libraries which are using in the projects of mine.
+A repository for storing third-party libraries.
 
 ## TODO List
 - Add License
