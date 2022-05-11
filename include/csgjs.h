@@ -15,6 +15,7 @@
 // solids are correctly handled.
 //
 // modified by dazza - 200421
+#pragma once
 
 #include <algorithm>
 #include <memory>
