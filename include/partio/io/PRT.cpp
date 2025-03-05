@@ -333,7 +333,7 @@ ParticlesDataMutable* readPRT(const char* filename,const bool headersOnly,std::o
 		}
 	}
     
-    delete prt_buf;
+    delete[] prt_buf;
     
     if (inflateEnd( &z ) != Z_OK) {
         if(errorStream) *errorStream<<"Zlib inflateEnd error"<<std::endl;
@@ -437,14 +437,14 @@ bool writePRT(const char* filename,const ParticlesData& p,const bool /*compresse
 
 
 namespace Partio{
-ParticlesDataMutable* readPRT(const char* filename,const bool headersOnly, std::ostream* errorStream)
+ParticlesDataMutable* readPRT(const char* filename,const bool headersOnly, std::ostream* error)
 {
     std::cerr<<"PRT not supported on windows"<<std::endl;
     return 0;
 }
 
 
-bool writePRT(const char* filename,const ParticlesData& p,const bool /*compressed*/, std::ostream* errorStream)
+bool writePRT(const char* filename,const ParticlesData& p,const bool /*compressed*/, std::ostream* error)
 {
     std::cerr<<"PRT not supported on windows"<<std::endl;
     return false;

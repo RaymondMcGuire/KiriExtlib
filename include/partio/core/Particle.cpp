@@ -36,14 +36,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
 #    define NOMINMAX
 #endif
 #define __STDC_LIMIT_MACROS
-#include "../PartioVec3.h"
+#include <PartioVec3.h>
 #include "ParticleSimple.h"
 #include "ParticleSimpleInterleave.h"
 #include <iostream>
 #include <string>
 #include <cstring>
 #include <cassert>
-#include <algorithm>
+#include <vector>
+#include <unordered_map>
+#include <memory>
+
 namespace Partio{
 
 std::string
@@ -71,29 +74,38 @@ createInterleave()
     return new ParticlesSimpleInterleave;
 }
 
+const std::string getMappedName(const std::string& input, const std::map<std::string, std::string>* attrNameMap)
+{
+    if (attrNameMap) {
+        auto it = attrNameMap->find(input);
+        if (it != attrNameMap->end())
+            return it->second;
+    }
+    return input;
+}
 
 ParticlesDataMutable*
-cloneSchema(const ParticlesData& other)
+cloneSchema(const ParticlesData& other, const std::map<std::string, std::string>* attrNameMap)
 {
     ParticlesDataMutable* p = create();
 
     FixedAttribute detail;
     for(int i=0;i<other.numFixedAttributes();++i) {
         other.fixedAttributeInfo(i,detail);
-        p->addFixedAttribute(detail.name.c_str(), detail.type, detail.count);
+        p->addFixedAttribute(getMappedName(detail.name, attrNameMap).c_str(), detail.type, detail.count);
     }
 
     ParticleAttribute attr;
     for(int j=0;j<other.numAttributes();++j) {
         other.attributeInfo(j,attr);
-        p->addAttribute(attr.name.c_str(), attr.type, attr.count);
+        p->addAttribute(getMappedName(attr.name, attrNameMap).c_str(), attr.type, attr.count);
     }
 
     return p;
 }
 
 ParticlesDataMutable*
-clone(const ParticlesData& other, bool particles)
+clone(const ParticlesData& other, bool particles, const std::map<std::string, std::string>* attrNameMap)
 {
     ParticlesDataMutable* p = create();
     // Fixed attributes
@@ -102,7 +114,7 @@ clone(const ParticlesData& other, bool particles)
         other.fixedAttributeInfo(i, srcFixedAttr);
 
         dstFixedAttr = p->addFixedAttribute(
-            srcFixedAttr.name.c_str(), srcFixedAttr.type, srcFixedAttr.count);
+            getMappedName(srcFixedAttr.name, attrNameMap).c_str(), srcFixedAttr.type, srcFixedAttr.count);
         assert(srcFixedAttr.type == dstFixedAttr.type);
         assert(srcFixedAttr.count == dstFixedAttr.count);
         // Register indexed strings
@@ -141,7 +153,7 @@ clone(const ParticlesData& other, bool particles)
             }
         }
         size_t size = Partio::TypeSize(srcAttr.type) * srcAttr.count;
-        dstAttr = p->addAttribute(srcAttr.name.c_str(), srcAttr.type, srcAttr.count);
+        dstAttr = p->addAttribute(getMappedName(srcAttr.name, attrNameMap).c_str(), srcAttr.type, srcAttr.count);
 
         for (Partio::ParticleIndex j = 0; j < numParticles; ++j) {
             const void *src = other.data<void>(srcAttr, j);
@@ -162,18 +174,27 @@ printAttr(const ParticlesData* p,const ParticleAttribute& attr,const int particl
     for(int k=0;k<attr.count;k++) std::cout<<" "<<data[k];
 }
 
+std::vector<ParticleAttribute>
+getAttrs(const ParticlesData& particles)
+{
+    std::vector<ParticleAttribute> attrs(particles.numAttributes());
+    for(int i=0;i<particles.numAttributes();i++){
+        particles.attributeInfo(i,attrs[i]);
+    }
+    return attrs;
+}
+
 void
 print(const ParticlesData* particles)
 {
     std::cout<<"Particle count "<<particles->numParticles()<<std::endl;
     std::cout<<"Attribute count "<<particles->numAttributes()<<std::endl;
 
-    std::vector<ParticleAttribute> attrs;
-    for(int i=0;i<particles->numAttributes();i++){
-        ParticleAttribute attr;
-        particles->attributeInfo(i,attr);
-        attrs.push_back(attr);
-        std::cout<<"attribute "<<attr.name<<" "<<int(attr.type)<<" "<<attr.count<<std::endl;
+    std::vector<ParticleAttribute> attrs = getAttrs(*particles);
+    for (const ParticleAttribute& attr : attrs) {
+        std::cout << "attribute " << attr.name
+                  << " type=" << TypeName(attr.type)
+                  << " count=" << attr.count << std::endl;
     }
 
     int numToPrint=std::min(10,particles->numParticles());
@@ -184,22 +205,35 @@ print(const ParticlesData* particles)
     for(size_t k=0;k<attrs.size();k++) accessors.push_back(ParticleAccessor(attrs[k]));
     for(size_t k=0;k<attrs.size();k++) it.addAccessor(accessors[k]);
 
-    for(int i=0;i<numToPrint && it != end;i++){
+    for(int i=0;i<numToPrint && it != end;i++, it++){
         std::cout<<i<<": ";
         for(unsigned int k=0;k<attrs.size();k++){
+            std::cout<<attrs[k].name<<"=";
+            if (attrs[k].count > 1) std::cout<<"(";
             switch(attrs[k].type){
             case NONE:break;
             case FLOAT:
             case VECTOR:
-                for(int c=0;c<attrs[k].count;c++) std::cout<<accessors[k].raw<float>(it)[c];
+                for(int c=0;c<attrs[k].count;c++) {
+                    if (c) std::cout << ",";
+                    std::cout<<accessors[k].raw<float>(it)[c];
+                }
                 break;
             case INT:
-                for(int c=0;c<attrs[k].count;c++) std::cout<<accessors[k].raw<int>(it)[c];
+                for(int c=0;c<attrs[k].count;c++) {
+                    if (c) std::cout << ",";
+                    std::cout<<accessors[k].raw<int>(it)[c]<<",";
+                }
                 break;
             case INDEXEDSTR:
-                for(int c=0;c<attrs[k].count;c++) std::cout<<accessors[k].raw<int>(it)[c];
+                for(int c=0;c<attrs[k].count;c++) {
+                    if (c) std::cout << ",";
+                    std::cout<<accessors[k].raw<int>(it)[c]<<",";
+                }
                 break;
             }
+            if (attrs[k].count > 1) std::cout<<")";
+            std::cout<<"\t";
         }
         std::cout<<std::endl;
     }
@@ -296,6 +330,9 @@ void addClusterAttribute(ParticlesDataMutable* cluster, ParticleAttribute& clust
             }
             break;
         }
+    case Partio::NONE:
+    default:
+        break;
     }
 }
 
@@ -330,11 +367,11 @@ computeClustering(ParticlesDataMutable* particles, const int numNeighbors,const 
             }
         }
     }
-    if (!hasPosAttr || posAttr.type != VECTOR && posAttr.type != FLOAT || posAttr.count !=3) {
+    if (!hasPosAttr || (posAttr.type != VECTOR && posAttr.type != FLOAT) || posAttr.count !=3) {
         cluster->release();
         return 0;
     }
-    if (!hasIdAttr ||idAttr.type != INT || idAttr.count != 1) {
+    if (!hasIdAttr || idAttr.type != INT || idAttr.count != 1) {
         cluster->release();
         return 0;
     }
@@ -400,6 +437,159 @@ computeClustering(ParticlesDataMutable* particles, const int numNeighbors,const 
         }
     }
     return cluster;;
+}
+
+template<typename T>
+struct AttributePair {
+    T base;
+    T delta;
+};
+
+void merge(ParticlesDataMutable& base, const ParticlesData& delta, const std::string& identifier)
+{
+    // Build a map from the identifier value to the particle index
+    // and locate the identifier attribute in the base.
+    // This assumes unique identifiers per particle.
+    std::unordered_map<int,int> idToParticleIndex;
+    ParticleAttribute baseIdAttr;
+    bool baseHasIdentifier = base.attributeInfo(identifier.c_str(), baseIdAttr);
+    if (baseHasIdentifier) {
+        if (baseIdAttr.type == INT) {
+            for (int i=0; i<base.numParticles(); i++) {
+                idToParticleIndex[base.data<int>(baseIdAttr,i)[0]] = i;
+            }
+        } else {
+            baseHasIdentifier = false;
+        }
+    }
+
+    // Locate the identifier attribute in the delta
+    ParticleAttribute deltaIdAttr;
+    bool deltaHasIdentifier = delta.attributeInfo(identifier.c_str(), deltaIdAttr);
+    if (deltaHasIdentifier) {
+        deltaHasIdentifier &= deltaIdAttr.type == INT;
+    }
+    bool hasIdentifier = baseHasIdentifier && deltaHasIdentifier;
+
+    // Identify the attributes to be copied (base present in delta)
+    std::vector<AttributePair<ParticleAttribute>> attrs;
+    std::vector<size_t> indexStrAttrs; /* indexes into attrs */
+    for (int i=0; i<base.numAttributes(); ++i) {
+        ParticleAttribute baseAttr, deltaAttr;
+        base.attributeInfo(i, baseAttr);
+        if (delta.attributeInfo(baseAttr.name.c_str(), deltaAttr)) {
+            if (baseAttr.type == INDEXEDSTR) {
+                indexStrAttrs.push_back(attrs.size());
+            }
+            attrs.emplace_back(AttributePair<ParticleAttribute>({std::move(baseAttr), std::move(deltaAttr)}));
+        }
+    }
+
+    // Identify the attributes to be added (in delta, not present in base)
+    double empty[16]{0};
+    for (int i=0; i<delta.numAttributes(); ++i) {
+        ParticleAttribute baseAttr, deltaAttr;
+        delta.attributeInfo(i, deltaAttr);
+        if (!base.attributeInfo(deltaAttr.name.c_str(), baseAttr)) {
+            baseAttr = base.addAttribute(deltaAttr.name.c_str(), deltaAttr.type, deltaAttr.count);
+            attrs.emplace_back(AttributePair<ParticleAttribute>({std::move(baseAttr), std::move(deltaAttr)}));
+
+            // Set the attribute to a default value in the base particle set
+            for (int p=0; p<base.numParticles(); ++p) {
+                base.set(baseAttr, p, empty);
+            }
+        }
+    }
+
+    // Identify fixed attributes to override
+    for (int i=0; i<base.numFixedAttributes(); ++i) {
+        FixedAttribute baseAttr, deltaAttr;
+        base.fixedAttributeInfo(i, baseAttr);
+        if (delta.fixedAttributeInfo(baseAttr.name.c_str(), deltaAttr)) {
+            const void *src = delta.fixedData<void>(deltaAttr);
+            base.setFixed(baseAttr, src);
+        }
+    }
+
+    // Identify fixed attributes to extend
+    for (int i=0; i<delta.numFixedAttributes(); ++i) {
+        FixedAttribute baseAttr, deltaAttr;
+        delta.fixedAttributeInfo(i, deltaAttr);
+        if (!base.fixedAttributeInfo(deltaAttr.name.c_str(), baseAttr)) {
+            baseAttr = base.addFixedAttribute(deltaAttr.name.c_str(), deltaAttr.type, deltaAttr.count);
+            const void *src = delta.fixedData<void>(deltaAttr);
+            base.setFixed(baseAttr, src);
+        }
+    }
+
+    // Merge the indexed strings. If the delta holds new strings for the same attribute,
+    // we have to re-index it and extend the base string list with the new strings.
+    // If the string exists in both, we still have to map the delta index to the base index.
+    std::unordered_map</*attr_name*/std::string,
+                       std::unordered_map</*delta_index*/int, /*base_index*/int> > stringToString;
+    for (size_t index : indexStrAttrs) {
+        const AttributePair<ParticleAttribute>& attr = attrs[index];
+
+        /* For each string in the delta, add to base if missing. And re-index. */
+        const std::vector<std::string>& baseStrs = base.indexedStrs(attr.base);
+        // Map source indices name->index for faster searching
+        std::unordered_map<std::string, size_t> indexInBase;
+        for (size_t i=0; i<baseStrs.size(); ++i) {
+            indexInBase[baseStrs[i]] = i;
+        }
+
+        // Loop through delta strs and reindex
+        const std::vector<std::string>& deltaStrs = delta.indexedStrs(attr.delta);
+        for (size_t i=0; i<deltaStrs.size(); ++i) {
+            const std::string& deltaStr = deltaStrs[i];
+
+            auto it = indexInBase.find(deltaStr);
+            if (it != indexInBase.end()) {
+                stringToString[attr.base.name][i] = it->second;
+            } else {
+                int newIndex = base.registerIndexedStr(attr.base, deltaStr.c_str());
+                stringToString[attr.base.name][i] = newIndex;
+            }
+        }
+    }
+
+
+    // Loop through the delta particles and incorporate into the base
+    for (int i=0; i<delta.numParticles(); ++i) {
+
+        // Grab index into base particle set - either existing or new
+        int index(-1);
+        if (hasIdentifier) {
+            int idValue = *(delta.data<int>(deltaIdAttr, i));
+            auto it = idToParticleIndex.find(idValue);
+            if (it != idToParticleIndex.end()) {
+                index = it->second;
+            }
+        }
+        if (index == -1) {
+            index = base.addParticle();
+        }
+
+        // Copy the attributes to the new/overridden particle
+        for (const AttributePair<ParticleAttribute>& attr : attrs) {
+            size_t size = Partio::TypeSize(attr.base.type) * attr.base.count;
+            void *dst = base.dataWrite<void>(attr.base, index);
+            const void* src;
+            std::unique_ptr<int[]> newIndices;
+            if (attr.base.type == INDEXEDSTR) {
+                newIndices.reset(new int[attr.base.count]);
+                const int* indices = delta.data<int>(attr.delta, i);
+                for (int j=0; j<attr.delta.count; ++j) {
+                    newIndices.get()[j] = stringToString[attr.base.name][indices[j]];
+                }
+                src = (void*)(newIndices.get());
+            }
+            else {
+                src = delta.data<void>(attr.delta, i);
+            }
+            std::memcpy(dst, src, size);
+        }
+    }
 }
 
 }
